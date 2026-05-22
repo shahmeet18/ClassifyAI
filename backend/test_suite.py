@@ -2,7 +2,6 @@ import asyncio
 import sys
 from unittest.mock import AsyncMock, patch
 from backend.app.classification.engine import ClassificationEngine
-from backend.app.openmetadata.om_client import OpenMetadataClient
 from backend.app.core.security import get_password_hash, verify_password, create_access_token, verify_access_token
 from backend.app.classification.policy_executor import PolicyExecutor
 from backend.app.models import Policy
@@ -34,42 +33,6 @@ def test_pattern_detection():
     assert "BusinessDomain.Operational" in default_res["data_type_tags"]
     assert default_res["sensitivity_level"] == "Internal"
     print("✓ Default field logic: PASS")
-
-def test_json_patch_builders():
-    print("\nRunning OpenMetadata JSON Patch Builder Tests...")
-    client = OpenMetadataClient()
-    
-    # Test building column tags patch
-    mock_columns = [
-        {"name": "email", "tags": [], "description": ""},
-        {"name": "balance", "tags": [], "description": ""}
-    ]
-    
-    patches = client.build_column_tags_patch(
-        columns=mock_columns,
-        target_column="email",
-        tags=["ClassifyAI_PersonalData.PII.Email"],
-        sensitivity="Confidential"
-    )
-    
-    assert len(patches) == 1
-    assert patches[0]["op"] == "add"
-    assert patches[0]["path"] == "/columns/0/tags"
-    assert any(t["tagFQN"] == "ClassifyAI_Sensitivity.Confidential" for t in patches[0]["value"])
-    print("✓ Column tags patch constructor: PASS")
-
-    # Test description patch
-    desc_patches = client.build_column_description_patch(
-        columns=mock_columns,
-        target_column="balance",
-        description="The current financial balance of the customer account"
-    )
-    
-    assert len(desc_patches) == 1
-    assert desc_patches[0]["op"] == "add"
-    assert desc_patches[0]["path"] == "/columns/1/description"
-    assert desc_patches[0]["value"] == "The current financial balance of the customer account"
-    print("✓ Column description patch constructor: PASS")
 
 def test_security_helpers():
     print("\nRunning Security Helpers Tests...")
@@ -173,7 +136,6 @@ def test_postgres_connector_mock():
 if __name__ == "__main__":
     try:
         test_pattern_detection()
-        test_json_patch_builders()
         test_security_helpers()
         test_policy_engine()
         test_postgres_connector_mock()

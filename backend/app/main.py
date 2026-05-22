@@ -13,11 +13,10 @@ from sqlalchemy import func, update, delete
 from backend.app.core.database import engine, Base, get_db, AsyncSessionLocal
 from backend.app.models import (
     DataSource, DataAsset, Classification, AssetDescription,
-    GlossaryTerm, AssetGlossaryLink, Policy, OMSyncLog, AppSetting
+    GlossaryTerm, AssetGlossaryLink, Policy, AppSetting
 )
 from backend.app.classification.engine import ClassificationEngine
 from backend.app.classification.policy_executor import PolicyExecutor
-from backend.app.openmetadata.om_client import OpenMetadataClient
 
 
 app = FastAPI(title="ClassifyAI Backend API", version="1.0.0")
@@ -46,12 +45,6 @@ def get_hermes_config() -> dict:
         "model": os.getenv("HERMES_MODEL", "hermes3"),
     }
 
-
-# OpenMetadata Client settings cached in memory for simplicity
-om_settings = {
-    "host_url": "",
-    "jwt_token": ""
-}
 
 @app.on_event("startup")
 async def startup_event():
@@ -1505,145 +1498,6 @@ async def review_classification(
     await db.commit()
     await db.refresh(cls)
     return cls
-
-# --- OpenMetadata Connection & Sync Endpoints ---
-@app.get("/api/v1/openmetadata/connection")
-async def get_om_connection():
-    client = OpenMetadataClient(om_settings["host_url"], om_settings["jwt_token"])
-    conn_status = await client.test_connection()
-    return {
-        "host_url": om_settings["host_url"] or "http://localhost:8585/api",
-        "jwt_token_configured": bool(om_settings["jwt_token"]),
-        "status": conn_status["status"],
-        "mode": conn_status["mode"],
-        "message": conn_status.get("message", "Connected successfully")
-    }
-
-@app.post("/api/v1/openmetadata/connection")
-async def save_om_connection(payload: Dict[str, Any] = Body(...)):
-    om_settings["host_url"] = payload.get("host_url", "")
-    om_settings["jwt_token"] = payload.get("jwt_token", "")
-    
-    client = OpenMetadataClient(om_settings["host_url"], om_settings["jwt_token"])
-    conn_status = await client.test_connection()
-    
-    return {
-        "status": conn_status["status"],
-        "mode": conn_status["mode"],
-        "message": conn_status.get("message", "Connection status checked.")
-    }
-
-@app.post("/api/v1/openmetadata/sync")
-async def trigger_openmetadata_sync(db: AsyncSession = Depends(get_db)):
-    client = OpenMetadataClient(om_settings["host_url"], om_settings["jwt_token"])
-    
-    # Seed mock classification tags on OM server
-    await client.create_classification("ClassifyAI_Sensitivity", "Managed by ClassifyAI")
-    await client.create_tag("ClassifyAI_Sensitivity", "Public", "Public Data")
-    await client.create_tag("ClassifyAI_Sensitivity", "Internal", "Internal Staff Data")
-    await client.create_tag("ClassifyAI_Sensitivity", "Confidential", "Confidential Sensitive Data")
-    await client.create_tag("ClassifyAI_Sensitivity", "Restricted", "Highly Restricted/PII Data")
-    await client.create_tag("ClassifyAI_Sensitivity", "Critical", "Mission Critical Data")
-    
-    await client.create_classification("ClassifyAI_PersonalData", "PII/PCI classifications")
-    await client.create_tag("ClassifyAI_PersonalData", "PII.Email", "Email addresses")
-    await client.create_tag("ClassifyAI_PersonalData", "PII.Phone", "Phone numbers")
-    await client.create_tag("ClassifyAI_PersonalData", "PII.SSN", "Social Security Numbers")
-    await client.create_tag("ClassifyAI_PersonalData", "PCI.CardNumber", "Credit card numbers")
-    await client.create_tag("ClassifyAI_PersonalData", "PII.Name", "Individual Names")
-
-    # Fetch unsynced classifications (Approved or Overridden)
-    q_class = select(Classification).where(
-        Classification.review_status.in_(["Approved", "Overridden"]),
-        Classification.synced_to_om == False
-    )
-    res_class = await db.execute(q_class)
-    classifications = res_class.scalars().all()
-    
-    synced_count = 0
-    errors = 0
-    
-    for cls in classifications:
-        # Load asset details
-        asset_res = await db.execute(select(DataAsset).where(DataAsset.id == cls.asset_id))
-        asset = asset_res.scalar_one_or_none()
-        if not asset or asset.asset_type != "column":
-            continue
-            
-        parent_res = await db.execute(select(DataAsset).where(DataAsset.id == asset.parent_asset_id))
-        parent_table = parent_res.scalar_one_or_none()
-        if not parent_table:
-            continue
-            
-        # Get description details to patch as well
-        desc_res = await db.execute(select(AssetDescription).where(AssetDescription.asset_id == asset.id))
-        desc = desc_res.scalar_one_or_none()
-        
-        # Build patch instructions for tags
-        tag_fqns = []
-        for tag in cls.data_type_tags:
-            tag_fqns.append(f"ClassifyAI_PersonalData.{tag}")
-            
-        # Create full mock columns format to patch
-        mock_columns = [
-            {"name": asset.display_name, "tags": [], "description": ""}
-        ]
-        
-        patches = client.build_column_tags_patch(
-            columns=mock_columns,
-            target_column=asset.display_name,
-            tags=tag_fqns,
-            sensitivity=cls.sensitivity_level
-        )
-        
-        # Patch description if exists
-        if desc and desc.business_description:
-            desc_patches = client.build_column_description_patch(
-                columns=mock_columns,
-                target_column=asset.display_name,
-                description=desc.business_description
-            )
-            patches.extend(desc_patches)
-            
-        # Execute patch
-        patch_result = await client.patch_table_metadata(parent_table.fully_qualified_name, patches)
-        
-        # Log to OMSyncLog
-        sync_log = OMSyncLog(
-            asset_fqn=asset.fully_qualified_name,
-            entity_type="column",
-            sync_status="success" if patch_result["status"] == "success" else "failed",
-            payload=patches,
-            error_message=patch_result.get("error")
-        )
-        db.add(sync_log)
-        
-        if patch_result["status"] == "success":
-            cls.synced_to_om = True
-            cls.synced_at = datetime.utcnow()
-            db.add(cls)
-            
-            if desc:
-                desc.synced_to_om = True
-                desc.synced_at = datetime.utcnow()
-                db.add(desc)
-                
-            synced_count += 1
-        else:
-            errors += 1
-            
-    await db.commit()
-    
-    return {
-        "status": "success",
-        "synced_count": synced_count,
-        "errors": errors
-    }
-
-@app.get("/api/v1/openmetadata/sync/logs")
-async def get_sync_logs(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(OMSyncLog).order_by(OMSyncLog.created_at.desc()).limit(50))
-    return result.scalars().all()
 
 # --- Policies Manager ---
 @app.get("/api/v1/policies")

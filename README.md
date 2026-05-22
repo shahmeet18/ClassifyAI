@@ -247,8 +247,8 @@ ClassifyAI/
 │   ├── app/
 │   │   ├── api/routes/       # Auth endpoints
 │   │   ├── classification/
-│   │   │   ├── agents/       # 9-agent YAML config + orchestrator
-│   │   │   ├── engine.py     # Classification engine (rule + LLM)
+│   │   │   ├── agents/       # 9-agent YAML config + Hermes orchestrator
+│   │   │   ├── engine.py     # Classification engine (rule-based + Hermes)
 │   │   │   └── policy_executor.py
 │   │   ├── connectors/       # PostgreSQL connector
 │   │   ├── core/             # Database, security, JWT
@@ -259,6 +259,7 @@ ClassifyAI/
 │   └── requirements.txt
 ├── web/
 │   ├── src/
+│   │   ├── assets/           # Static assets (images)
 │   │   ├── components/       # Dashboard, AssetDictionary, Policies…
 │   │   ├── contexts/         # AuthContext (Supabase)
 │   │   ├── lib/supabase.ts   # Supabase client
@@ -271,6 +272,7 @@ ClassifyAI/
 ├── docs/
 │   └── classification_criteria.md   # Full classification taxonomy reference
 ├── .env.example              # Environment variable template
+├── LICENSE
 └── README.md
 ```
 

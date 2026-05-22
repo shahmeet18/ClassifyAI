@@ -15,7 +15,6 @@ class DataSource(Base):
     description = Column(String(500))
     source_type = Column(String(50), nullable=False) # e.g. postgres, mysql, snowflake, s3
     connection_config = Column(JSON) # Stored config
-    openmetadata_service_id = Column(String(100))
     scan_schedule = Column(String(100)) # cron
     sampling_rate = Column(Float, default=100.0) # percentage of rows to scan
     last_scanned_at = Column(DateTime)
@@ -35,8 +34,6 @@ class DataAsset(Base):
     fully_qualified_name = Column(String(500), unique=True, nullable=False)
     display_name = Column(String(200))
     description = Column(String(2000))
-    openmetadata_id = Column(String(100))
-    openmetadata_fqn = Column(String(500))
     parent_asset_id = Column(String(36), ForeignKey("data_assets.id", ondelete="CASCADE"))
     metadata_json = Column(JSON) # e.g. column type, table row count
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -147,19 +144,6 @@ class Policy(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class OMSyncLog(Base):
-    __tablename__ = "om_sync_logs"
-
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    asset_fqn = Column(String(500), nullable=False)
-    entity_type = Column(String(50), nullable=False) # table, column
-    sync_status = Column(String(50), nullable=False) # success, failed
-    sync_details = Column(String(2000))
-    payload = Column(JSON)
-    error_message = Column(String(1000))
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class User(Base):
