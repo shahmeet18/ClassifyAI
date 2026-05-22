@@ -18,26 +18,69 @@ Automatically scan, classify, and catalog sensitive data across your databases u
 
 ## ✨ What is ClassifyAI?
 
-ClassifyAI is an end-to-end **data security governance platform** that helps teams discover, classify, and manage sensitive data across databases and file stores. It combines fast rule-based detection with a coordinated pipeline of specialized AI agents to label every column in your data estate with the correct sensitivity tier, regulatory tags, and a human-readable business description — then surfaces all of this in an interactive web dashboard for stewards to review, approve, and publish back to your data catalog.
+ClassifyAI is an end-to-end **data security governance platform** that helps teams discover, classify, and manage sensitive data across databases and file stores. It combines fast rule-based detection with **Hermes** — a custom-built multi-agent AI orchestration framework — to label every column in your data estate with the correct sensitivity tier, regulatory tags, and a human-readable business description. All results surface in an interactive web dashboard where data stewards can review, approve, or override AI classifications before they become official.
 
 ---
 
 ## 🚀 Features
 
-### 🤖 Multi-Agent AI Classification Pipeline
-Nine specialized AI agents (powered by Claude / any OpenAI-compatible LLM) work in sequence on every column:
+### 🧠 Hermes — Custom Multi-Agent AI Framework
+
+**Hermes** is the AI engine at the heart of ClassifyAI. It is a custom-built multi-agent orchestration framework where 9 specialized LLM agents run in a coordinated sequence, each focused on a specific classification task and passing enriched context downstream to the next agent.
+
+Every agent is independently defined in a **YAML configuration file** with its own system prompt, output schema, and enable/disable toggle — making the pipeline fully transparent, configurable, and extensible without touching any Python code.
+
+```
+Column Input
+     │
+     ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ PII         │───▶│ PCI         │───▶│ PHI         │
+│ Detector    │    │ Detector    │    │ Detector    │
+└─────────────┘    └─────────────┘    └─────────────┘
+                                             │
+                          ┌──────────────────┘
+                          ▼
+               ┌──────────────────────┐
+               │ Business Domain      │
+               │ Classifier           │
+               └──────────────────────┘
+                          │
+               ┌──────────┴──────────┐
+               ▼                     ▼
+     ┌──────────────┐      ┌──────────────────┐
+     │ Sensitivity  │      │ Regulatory       │
+     │ Classifier   │      │ Tagger           │
+     └──────────────┘      └──────────────────┘
+               │                     │
+               └──────────┬──────────┘
+                          ▼
+               ┌──────────────────────┐
+               │ Description          │
+               │ Generator            │
+               └──────────────────────┘
+                          │
+               ┌──────────┴──────────┐
+               ▼                     ▼
+     ┌──────────────┐      ┌──────────────────┐
+     │ Table        │      │ Database         │
+     │ Summarizer   │      │ Profiler         │
+     └──────────────┘      └──────────────────┘
+```
 
 | Agent | Role |
 |---|---|
 | **PII Detector** | Names, emails, phones, addresses, SSNs, biometrics, behavioral IDs |
 | **PCI Detector** | Card numbers (PANs), CVVs, bank account numbers |
 | **PHI Detector** | Medical records, diagnoses (ICD codes), insurance details |
-| **Business Domain Classifier** | Assigns Financial / HR / Legal / Customer / Operational / R&D domain + AI readiness |
-| **Sensitivity Classifier** | Synthesises all tags into one of 5 sensitivity tiers |
-| **Regulatory Tagger** | Maps data to GDPR, HIPAA, PCI-DSS, CCPA, SOX |
+| **Business Domain Classifier** | Assigns Financial / HR / Legal / Customer / Operational / R&D domain + AI readiness tag |
+| **Sensitivity Classifier** | Synthesises all upstream tags into one of 5 sensitivity tiers |
+| **Regulatory Tagger** | Maps detected data to GDPR, HIPAA, PCI-DSS, CCPA, SOX |
 | **Description Generator** | Writes a 1–2 sentence business description per column |
-| **Table Summarizer** | Generates a business summary for each table |
-| **Database Profiler** | Produces an executive-level database risk profile |
+| **Table Summarizer** | Generates a business-level summary for each table |
+| **Database Profiler** | Produces an executive-level risk profile for the entire database |
+
+Hermes connects to **Anthropic Claude** (or any OpenAI-compatible endpoint) and falls back gracefully to the built-in rule-based engine if no API key is configured — ensuring the platform is always functional.
 
 ### 🏷️ 5-Tier Sensitivity Classification
 
@@ -70,9 +113,6 @@ Nested directory view (Source → Table → Column) with inline classification e
 ### 📖 Business Glossary
 Define and link reusable business terms (e.g. CLV, PHI, ARR) directly to catalog assets.
 
-### 🔄 OpenMetadata Catalog Sync
-Publish verified classifications and descriptions back to your OpenMetadata instance using the JSON Patch API with full sync audit logs.
-
 ### 🔐 Auth & Multi-Tenancy
 Supabase-backed authentication with organization support, role-based access (admin / steward / reviewer / viewer), and JWT-secured API.
 
@@ -93,16 +133,23 @@ Supabase-backed authentication with organization support, role-based access (adm
 │  Asset Dictionary        │   /api/v1/review        (queue)      │
 │  Policy Rules            │   /api/v1/policies      (engine)     │
 │  Settings + Agent Studio │   /api/v1/agents        (config)     │
-│                          │   /api/v1/openmetadata  (sync)       │
 └──────────────────────────┴──────────────────────────────────────┘
           │                              │
           └──────── Supabase Auth ───────┘
                          │
               ┌──────────▼──────────┐
-              │   Multi-Agent AI    │
-              │  (Claude / OpenAI)  │
+              │       Hermes        │
+              │  Multi-Agent AI     │
+              │  Orchestration      │
+              │  Framework          │
               │  9 specialized LLM  │
-              │  agents in pipeline │
+              │  agents · YAML cfg  │
+              └─────────────────────┘
+                         │
+              ┌──────────▼──────────┐
+              │  Anthropic Claude   │
+              │  (or any OpenAI-    │
+              │  compatible LLM)    │
               └─────────────────────┘
 ```
 
@@ -115,9 +162,8 @@ Supabase-backed authentication with organization support, role-based access (adm
 | **Backend** | Python 3.10+, FastAPI, SQLAlchemy 2.0, aiosqlite, asyncpg |
 | **Frontend** | React 18, TypeScript, Vite 5 |
 | **Auth** | Supabase (Auth + PostgreSQL for profiles/orgs) |
-| **AI / LLM** | Anthropic Claude (or any OpenAI-compatible endpoint) |
+| **AI Agents** | Hermes (custom multi-agent framework) + Anthropic Claude / any OpenAI-compatible LLM |
 | **Database** | SQLite (local dev) / PostgreSQL (production) |
-| **Catalog** | OpenMetadata JSON Patch API |
 
 ---
 
@@ -206,7 +252,6 @@ ClassifyAI/
 │   │   │   └── policy_executor.py
 │   │   ├── connectors/       # PostgreSQL connector
 │   │   ├── core/             # Database, security, JWT
-│   │   ├── openmetadata/     # OM catalog sync client
 │   │   ├── main.py           # FastAPI app + all routes
 │   │   └── models.py         # SQLAlchemy models
 │   ├── seed.py               # Seed default data
@@ -238,7 +283,23 @@ ClassifyAI/
 PYTHONPATH=. python backend/test_suite.py
 ```
 
-Covers: pattern detection, JSON patch builders, security helpers (password hashing, JWT), policy engine, and PostgreSQL connector mocking.
+Covers: pattern detection, security helpers (password hashing, JWT), policy engine, and PostgreSQL connector mocking.
+
+---
+
+## 🔭 Roadmap
+
+ClassifyAI is actively evolving. Here's what's coming next:
+
+- **🧩 Custom Classifiers** — Allow users to define and plug in their own classification agents directly from the dashboard, without modifying any backend code. Custom agents will follow the same YAML-based configuration pattern as the built-in Hermes agents.
+
+- **🔗 Data Catalog Integrations** — Native integrations with popular open-source data cataloging platforms including **OpenMetadata** and **DataHub**, enabling two-way sync of classifications, tags, and business descriptions.
+
+- **📊 More Native Connectors** — First-class connectors for Snowflake, BigQuery, MySQL, and AWS S3 to replace the current simulated implementations.
+
+- **🔔 Alerting & Notifications** — Slack and email alerts when high-sensitivity data is discovered or when policy violations are detected during a scan.
+
+- **📈 Audit & Compliance Reports** — Exportable PDF/CSV compliance reports per regulatory standard (GDPR, HIPAA, PCI-DSS) for use in audits.
 
 ---
 
